@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!server.mjs
+!health.mjs
+!http.mjs
+!manifest.mjs
+!providers.mjs
+!version.mjs

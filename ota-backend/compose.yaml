@@ -1,0 +1,29 @@
+name: gen-nettools-ota
+services:
+  control-plane:
+    build:
+      context: .
+    image: gen-nettools-ota:0.1.1
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "23887:23887/tcp"
+    environment:
+      NETTOOLS_OTA_MINIMUM_CLIENT_VERSION: "${NETTOOLS_OTA_MINIMUM_CLIENT_VERSION:-}"
+      NETTOOLS_OTA_BOOTSTRAP_WITHOUT_UPSTREAM: "${NETTOOLS_OTA_BOOTSTRAP_WITHOUT_UPSTREAM:-0}"
+    volumes:
+      - type: bind
+        source: "${NETTOOLS_OTA_RUNTIME_DIR:?Set NETTOOLS_OTA_RUNTIME_DIR to the externally provisioned material directory}"
+        target: /run/gen-nettools-ota
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: [CMD, node, health.mjs]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

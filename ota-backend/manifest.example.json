@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "appId": "gen-NetTools",
+  "tag": "v0.1.2",
+  "version": "0.1.2",
+  "channel": "stable",
+  "releaseStage": "stable",
+  "platform": "win32",
+  "arch": "x64",
+  "promotesFrom": ["0.1.2-b3"],
+  "minimumVersion": "0.1.1",
+  "mandatory": false,
+  "notes": "发布说明示例",
+  "installer": {
+    "fileName": "gen-NetTools-0.1.2-win-x64-setup.exe",
+    "size": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}
