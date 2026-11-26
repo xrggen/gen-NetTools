@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { DesktopApi, KeyChange, UpdateChannel, UpdateConfiguration, UpdateStatus } from '../shared/contracts';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { DesktopApi, UpdateChannel, UpdateConfiguration, UpdateStatus } from '../shared/contracts';
 
 declare global { interface Window { nettools: DesktopApi } }
 
@@ -23,10 +23,26 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '更新操作失败。';
 }
 
+function UpdateProgress({ progress }: { progress?: number }) {
+  const bar = useRef<HTMLSpanElement>(null);
+  const lastProgress = useRef(0);
+  useLayoutEffect(() => {
+    const value = progress ?? 0;
+    const delta = value - lastProgress.current;
+    const duration = delta > 0 ? Math.max(500, Math.min(3000, Math.round(delta * 5000))) : 0;
+    bar.current?.style.setProperty('--update-progress', `${value}%`);
+    bar.current?.style.setProperty('--update-progress-duration', `${duration}ms`);
+    lastProgress.current = value;
+  }, [progress]);
+  return <div className={`update-progress-track${progress === undefined ? ' indeterminate' : progress > 50 ? ' majority' : ''}`}
+    role="progressbar" aria-label="更新下载进度" aria-valuenow={progress === undefined ? undefined : Math.floor(progress)}>
+    <span ref={bar} />
+  </div>;
+}
+
 export function SoftwareUpdate({ onError }: { onError: (error: unknown) => void }) {
   const [status, setStatus] = useState<UpdateStatus>();
   const [channel, setChannel] = useState<UpdateChannel>('stable');
-  const [access, setAccess] = useState('');
   const [busy, setBusy] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [message, setMessage] = useState('');
@@ -62,13 +78,13 @@ export function SoftwareUpdate({ onError }: { onError: (error: unknown) => void 
 
   const busyState = ['checking', 'downloading', 'installing'].includes(status.state);
   const locked = busy || busyState;
-  const accessChange: KeyChange | undefined = access.trim() ? { mode: 'replace', value: access.trim() } : undefined;
-  const needsAccess = !status.hasAccess && !accessChange;
-  const canCheck = !locked && !needsAccess;
-  const canSave = !locked && (edited.current || Boolean(accessChange));
+  const checking = status.state === 'checking';
+  const ready = status.state === 'ready';
+  const canCheck = !locked && status.state !== 'configuration-required';
+  const canSave = !locked && edited.current;
   const downloaded = Math.max(0, status.downloaded ?? 0);
   const size = status.size;
-  const percent = size && size > 0 ? Math.min(100, Math.floor(downloaded * 100 / size)) : undefined;
+  const progress = size && size > 0 ? Math.min(100, downloaded * 100 / size) : undefined;
 
   function markEdited() {
     edited.current = true;
@@ -76,12 +92,11 @@ export function SoftwareUpdate({ onError }: { onError: (error: unknown) => void 
     setStatus(current => current ? { ...current, message: undefined } : current);
   }
 
-  async function configure(accessOverride: KeyChange | undefined = accessChange): Promise<UpdateStatus> {
-    const configuration: UpdateConfiguration = { channel, source: 'online', access: accessOverride };
+  async function configure(): Promise<UpdateStatus> {
+    const configuration: UpdateConfiguration = { channel, source: 'online' };
     const next = await api.configureUpdate(configuration);
     setStatus(next);
     setChannel(next.channel);
-    setAccess('');
     edited.current = false;
     if (next.message) setMessage(next.message);
     return next;
@@ -141,35 +156,29 @@ export function SoftwareUpdate({ onError }: { onError: (error: unknown) => void 
         markEdited(); setChannel(event.target.checked ? 'beta' : 'stable');
       }}/>接收 Beta 测试更新</label>
       <div className="update-source-label"><span>更新来源</span><strong>在线更新服务</strong><small>应用启动时自动检查，也可手动触发。</small></div>
-      <label className="update-access">控制面访问凭据<input type="password" autoComplete="off" spellCheck={false}
-        value={access} placeholder={status.hasAccess ? '已保存，填写可替换' : '输入访问凭据'}
-        onChange={event => { markEdited(); setAccess(event.target.value); }}/></label>
       <div className="update-actions">
-        {status.hasAccess && <button type="button" disabled={Boolean(accessChange)} onClick={() => void perform(async () => {
-          const next = await configure({ mode: 'clear' });
-          setMessage('已清除保存的控制面访问凭据。');
-          return next;
-        })}>清除已保存凭据</button>}
         <button type="button" disabled={!canSave} onClick={() => void saveSettings()}>保存更新设置</button>
         <button className="primary" type="button" disabled={!canCheck} onClick={() => void check()}>
-          {status.state === 'checking' ? '正在检查…' : '检查更新'}
+          {checking ? '正在检查…' : '检查更新'}
         </button>
+        {checking && <span className="update-check-spinner" aria-hidden="true">
+          <svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="9.4" pathLength="100" /></svg>
+        </span>}
       </div>
     </fieldset>
 
-    {needsAccess && <p className="notice">请输入控制面访问凭据，再检查在线更新。</p>}
-    {status.latestVersion && <div className="update-release">
-      <div className="update-release-heading"><h3>{status.state === 'available' || status.state === 'downloading' || status.state === 'paused' || status.state === 'ready' || status.state === 'error'
-        ? `发现版本 ${status.latestVersion}` : `版本 ${status.latestVersion}`}</h3>
+    {status.latestVersion && <div key={ready ? 'ready' : 'release'} className={`update-release${ready ? ' update-release-ready' : ''}`}>
+      <div className="update-release-heading">
+        {ready && <span className="update-ready-orbit" aria-hidden="true"><span /></span>}
+        <h3>{ready ? `版本 ${status.latestVersion} 已验证` : `版本 ${status.latestVersion}`}</h3>
         {status.mandatory && <span className="update-required">必需更新</span>}</div>
       {status.notes && <p className="update-notes">{status.notes}</p>}
     </div>}
 
-    {(['downloading', 'paused', 'ready'].includes(status.state) || (status.state === 'error' && Boolean(status.latestVersion))) && <div className="update-progress-block">
-      <div className="update-progress-label"><strong>{status.state === 'paused' ? '下载已暂停' : status.state === 'ready' ? '下载完成' : status.state === 'error' ? '下载中断' : '正在下载更新'}</strong>
-        <span>{progressText}{percent !== undefined ? ` · ${percent}%` : ''}</span></div>
-      <progress max={size && size > 0 ? size : undefined} value={size && size > 0 ? Math.min(downloaded, size) : undefined}
-        aria-label="更新下载进度" />
+    {(['downloading', 'paused'].includes(status.state) || (status.state === 'error' && Boolean(status.latestVersion))) && <div className="update-progress-block">
+      <div className="update-progress-label"><strong>{status.state === 'paused' ? '下载已暂停' : status.state === 'error' ? '下载中断' : '正在下载更新'}</strong>
+        <span>{progressText}{progress !== undefined ? ` · ${Math.floor(progress)}%` : ''}</span></div>
+      <UpdateProgress progress={progress} />
     </div>}
 
     {stateMessage && <p className={`notice ${status.state === 'error' ? 'error' : ''}`} role={status.state === 'error' ? 'alert' : 'status'}>{stateMessage}</p>}

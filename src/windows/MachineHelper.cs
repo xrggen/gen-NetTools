@@ -3,13 +3,22 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Security;
 using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
+using Microsoft.CSharp.RuntimeBinder;
+using Microsoft.Win32;
 
 internal static class MachineHelper
 {
+    private const string OtaRegistryPath = @"Software\gen-NetTools\OTA";
+    private const string OtaRegistryValue = "ControlPlaneAccess";
+    private const string OtaEntropy = "gen-NetTools/ota-access/v1";
+
+    [STAThread]
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "program-data")
@@ -19,13 +28,16 @@ internal static class MachineHelper
             return 0;
         }
         if (args.Length == 1 && args[0] == "ota-cache") return OtaCache();
+        if (args.Length == 1 && args[0] == "launch-installed") return LaunchInstalled();
         if (args.Length == 3 && args[0] == "ota-install") return OtaInstall(args[1], args[2]);
         if (args.Length == 1 && (args[0] == "protect" || args[0] == "unprotect"))
         {
             return Crypt(args[0] == "protect", "gen-NetTools/model-access/v1");
         }
-        if (args.Length == 1 && (args[0] == "ota-protect" || args[0] == "ota-unprotect"))
-            return Crypt(args[0] == "ota-protect", "gen-NetTools/ota-access/v1");
+        if (args.Length == 1 && args[0] == "ota-unprotect")
+            return Crypt(false, OtaEntropy);
+        if (args.Length == 1 && args[0] == "ota-provision") return ProvisionOta();
+        if (args.Length == 1 && args[0] == "ota-read-managed") return ReadManagedOta();
         if (args.Length == 1 && args[0] == "purge-data") return PurgeData();
         if (args.Length == 1 && args[0] == "prepare-data") return PrepareData();
         if (args.Length == 2 && args[0] == "purge-app") return PurgeApp(args[1]);
@@ -167,6 +179,38 @@ internal static class MachineHelper
         catch (DirectoryNotFoundException) { return false; }
     }
 
+    private static int LaunchInstalled()
+    {
+        try
+        {
+            string location;
+            using (var installed = Registry.LocalMachine.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall\gen-NetTools"))
+                location = installed == null ? null : installed.GetValue("InstallLocation") as string;
+            if (String.IsNullOrEmpty(location) || !Path.IsPathRooted(location)) return 69;
+            string file = Path.GetFullPath(Path.Combine(location, "app", "gen-NetTools.exe"));
+            if (HasLink(file) || !File.Exists(file)) return 69;
+
+            // Use the desktop Explorer automation object so the app runs as the interactive user.
+            var shellWindows = new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39");
+            dynamic windows = Activator.CreateInstance(Type.GetTypeFromCLSID(shellWindows));
+            object desktopLocation = 0; // CSIDL_DESKTOP
+            object root = null;
+            int handle;
+            const int desktopWindow = 8; // SWC_DESKTOP
+            const int needDispatch = 1; // SWFO_NEEDDISPATCH
+            dynamic desktop = windows.FindWindowSW(ref desktopLocation, ref root, desktopWindow, out handle, needDispatch);
+            if (desktop == null) return 69;
+            desktop.Document.Application.ShellExecute(file, "", Path.GetDirectoryName(file), "open", 1);
+            return 0;
+        }
+        catch (COMException) { return 69; }
+        catch (RuntimeBinderException) { return 69; }
+        catch (IOException) { return 69; }
+        catch (UnauthorizedAccessException) { return 69; }
+        catch (ArgumentException) { return 69; }
+    }
+
     private static bool HasLink(string path)
     {
         for (string current = path; !String.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
@@ -226,7 +270,35 @@ internal static class MachineHelper
         catch (ArgumentException) { return 68; }
     }
 
-    private static int Crypt(bool protect, string entropyText)
+    private static int ProvisionOta()
+    {
+        using (var identity = WindowsIdentity.GetCurrent())
+            if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) return 5;
+        return Crypt(true, OtaEntropy, true);
+    }
+
+    private static int ReadManagedOta()
+    {
+        byte[] stored = null;
+        try
+        {
+            using (var key = Registry.LocalMachine.OpenSubKey(OtaRegistryPath))
+            {
+                object value = key == null ? null : key.GetValue(OtaRegistryValue);
+                if (value == null) return 3;
+                stored = value as byte[];
+            }
+            if (stored == null || stored.Length == 0 || stored.Length > 4096) return 68;
+            using (Stream target = Console.OpenStandardOutput()) target.Write(stored, 0, stored.Length);
+            return 0;
+        }
+        catch (SecurityException) { return 68; }
+        catch (UnauthorizedAccessException) { return 68; }
+        catch (IOException) { return 67; }
+        finally { if (stored != null) Array.Clear(stored, 0, stored.Length); }
+    }
+
+    private static int Crypt(bool protect, string entropyText, bool saveManagedOtaAccess = false)
     {
         byte[] input = new byte[16384];
         byte[] exactInput = null;
@@ -245,14 +317,26 @@ internal static class MachineHelper
             if (length == 0 || length == input.Length) return 65;
             exactInput = new byte[length];
             Buffer.BlockCopy(input, 0, exactInput, 0, length);
+            if (saveManagedOtaAccess && (length < 32 || length > 256 ||
+                Array.Exists(exactInput, value => value < 0x21 || value > 0x7e))) return 65;
             context = System.Text.Encoding.UTF8.GetBytes(entropyText);
             output = protect
                 ? ProtectedData.Protect(exactInput, context, DataProtectionScope.LocalMachine)
                 : ProtectedData.Unprotect(exactInput, context, DataProtectionScope.LocalMachine);
-            using (Stream target = Console.OpenStandardOutput()) target.Write(output, 0, output.Length);
+            if (saveManagedOtaAccess)
+            {
+                using (var key = Registry.LocalMachine.CreateSubKey(OtaRegistryPath))
+                    key.SetValue(OtaRegistryValue, output, RegistryValueKind.Binary);
+            }
+            else
+            {
+                using (Stream target = Console.OpenStandardOutput()) target.Write(output, 0, output.Length);
+            }
             return 0;
         }
         catch (CryptographicException) { return 66; }
+        catch (SecurityException) { return 68; }
+        catch (UnauthorizedAccessException) { return 68; }
         catch (IOException) { return 67; }
         finally
         {

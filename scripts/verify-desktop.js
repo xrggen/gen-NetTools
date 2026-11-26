@@ -117,12 +117,21 @@ async (fixture, mock, imports) => {
   const ota = await api.updateStatus();
   const otaPanel = document.querySelector('[aria-label="软件更新"]');
   const check = Array.from(otaPanel?.querySelectorAll('button') ?? []).find(button => button.textContent === '检查更新');
-  expect(ota.state === 'configuration-required' && /^\d+\.\d+\.\d+$/.test(ota.version) && ota.channel === 'stable' && !ota.hasAccess && check?.disabled,
+  const beta = /-b[1-9]\d*$/.test(ota.version);
+  expect(ota.state === 'configuration-required' && /^\d+\.\d+\.\d+(?:-b[1-9]\d*)?$/.test(ota.version) &&
+    ota.channel === (beta ? 'beta' : 'stable') && !ota.hasAccess && check?.disabled,
     'OTA 初始状态、版本或无凭据时的检查限制错误。');
-  const savedOta = await api.configureUpdate({ source: 'online', channel: 'beta', access: { mode: 'replace', value: 'synthetic-smoke-ota-access-00000000' } });
-  expect(savedOta.hasAccess && savedOta.channel === 'beta' && !Object.hasOwn(savedOta, 'access'), 'OTA 通道或凭据状态错误。');
-  const clearedOta = await api.configureUpdate({ source: 'online', channel: 'stable', access: { mode: 'clear' } });
-  expect(!clearedOta.hasAccess && clearedOta.state === 'configuration-required', '清除 OTA 凭据后没有停用检查。');
+  expect(!otaPanel.querySelector('input[type="password"]') && !otaPanel.textContent.includes('清除已保存凭据'), 'OTA 凭据编辑入口仍可见。');
+  const alternateChannel = beta ? 'stable' : 'beta';
+  const savedOta = await api.configureUpdate({ source: 'online', channel: alternateChannel });
+  expect(savedOta.channel === alternateChannel && !savedOta.hasAccess && !Object.hasOwn(savedOta, 'access'), 'OTA 通道设置或授权状态错误。');
+  for (const access of [{ mode: 'replace', value: 'synthetic-smoke-ota-access-00000000' }, { mode: 'clear' }]) {
+    let refused = false;
+    try { await api.configureUpdate({ source: 'online', channel: alternateChannel, access }); }
+    catch (error) { refused = String(error.message).includes('授权由部署方管理'); }
+    expect(refused, 'OTA IPC 允许用户修改授权。');
+  }
+  await api.configureUpdate({ source: 'online', channel: ota.channel });
   const config = { feature: 'config', mode: 'exact', before: { text: '# a\r\nport 1\n' }, after: { text: '# A\nport 1 \n' } };
   await api.run(config);
   const diff = await api.run(config);

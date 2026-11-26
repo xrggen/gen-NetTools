@@ -101,7 +101,7 @@ export type AiAnalysis = {
 };
 export type UpdateChannel = 'stable' | 'beta';
 export type UpdateSource = 'online' | 'local';
-export type UpdateConfiguration = { channel: UpdateChannel; source: UpdateSource; access?: KeyChange };
+export type UpdateConfiguration = { channel: UpdateChannel; source: UpdateSource };
 export type UpdateState = 'configuration-required' | 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'paused' | 'ready' | 'installing' | 'error';
 export type UpdateStatus = {
   version: string;

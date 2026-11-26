@@ -1,0 +1,17 @@
+[Unit]
+Description=gen-NetTools OTA with ScreenShare GitCode Release reader
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=/bin/bash /opt/gen-nettools-ota/screenshare-reader-v1/run-screenshare-ota.sh
+Restart=always
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=25s
+
+[Install]
+WantedBy=multi-user.target

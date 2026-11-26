@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { parseVersion } from '../ota-backend/version.mjs';
 
 export const shared = 'C:\\Users\\Administrator\\Desktop\\VibeCoding\\env';
 const localeFile = /^(?:en|zh)(?:-[a-z\d]+)*\.pak$/i;
@@ -17,7 +18,7 @@ export async function stageWindows(taskDirectory, versionOverride) {
 
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   const version = versionOverride ?? manifest.version;
-  if (manifest.productName !== 'gen-NetTools' || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('产品名或版本格式无效。');
+  if (manifest.productName !== 'gen-NetTools' || !parseVersion(version)) throw new Error('产品名或版本格式无效。');
   const electron = dirname(createRequire(import.meta.url)('electron'));
   const stagingRoot = await mkdtemp(join(parent, 'stage-'));
   const stage = join(stagingRoot, manifest.productName);

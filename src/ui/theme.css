@@ -93,22 +93,39 @@ table{width:100%;border-collapse:collapse;table-layout:fixed;margin:6px 0 10px}t
 .update-current{flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;border:1px solid #dbe6f1;border-radius:8px;background:#f7faff;color:#536a83}
 .update-current strong{color:#1d385a;font-variant-numeric:tabular-nums}
 .update-divider{width:1px;height:22px;margin:0 4px;background:#d3dfec}
-.update-options{display:grid;grid-template-columns:minmax(190px,1fr) minmax(160px,1fr);gap:12px 18px;align-items:end}
-.update-options .update-beta{grid-column:1 / -1;margin:0}
-.update-source-label,.update-access{display:grid;gap:6px;min-width:0}
-.update-source-label{align-self:center;color:#52687f}
+.update-options{display:grid;gap:12px}
+.update-options .update-beta{margin:0}
+.update-source-label{display:grid;gap:6px;color:#52687f}
 .update-source-label strong{color:#1d385a}
-.update-access input{width:100%;min-width:0}
-.update-options .update-actions{grid-column:1 / -1;margin-top:1px}
+.update-options .update-actions{margin-top:1px}
 .update-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.update-release{margin-top:14px;padding:12px;border:1px solid #dbe6f1;border-radius:8px;background:#f9fbfe}
+.update-check-spinner{display:grid;place-items:center;width:22px;height:22px;color:#155bd9}
+.update-check-spinner svg{width:22px;height:22px;animation:ota-rotate 1500ms linear infinite}
+.update-check-spinner circle{fill:none;stroke:currentColor;stroke-width:2.75;stroke-linecap:round;stroke-dasharray:25 75}
+.update-release{margin-top:14px;padding:12px;border:1px solid #dbe6f1;border-radius:8px;background:#f9fbfe;animation:ota-release-enter 300ms cubic-bezier(.22,1,.36,1) both}
+.update-release-ready{border-color:#a8d9bd;background:#f2faf5}
 .update-release-heading{justify-content:space-between;flex-wrap:wrap}
+.update-release-ready .update-release-heading{justify-content:flex-start}
 .update-release-heading h3{margin:0}
+.update-ready-orbit{position:relative;flex:0 0 30px;height:30px;border:1px solid #acc7f1;border-radius:50%;background:#edf4ff}
+.update-ready-orbit::before,.update-ready-orbit span{position:absolute;border-radius:50%}
+.update-ready-orbit::before{inset:9px;background:#155bd9;content:""}
+.update-ready-orbit span{top:1px;left:12px;width:5px;height:5px;background:#0d9bad;transform-origin:3px 13px;animation:ota-rotate 1400ms linear infinite}
 .update-required{padding:3px 8px;border-radius:12px;background:#fff0ed;color:#9a3228;font-size:12px;font-weight:650}
 .update-notes{margin:8px 0 0;color:#40556d;white-space:pre-wrap;overflow-wrap:anywhere}
 .update-progress-block{margin-top:14px;padding:11px 12px;border:1px solid #dbe6f1;border-radius:8px;background:#f7faff}
 .update-progress-label{justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;color:#40556d;font-variant-numeric:tabular-nums}
-.update-progress-block progress{display:block;width:100%;height:12px;accent-color:#155bd9}
+.update-progress-track{width:100%;height:10px;overflow:hidden;border-radius:5px;background:#dfe8f3}
+.update-progress-track span{display:block;width:var(--update-progress,0%);height:100%;border-radius:inherit;background:#155bd9;transition:width var(--update-progress-duration,0ms) cubic-bezier(.37,0,.63,1),background-color 180ms ease}
+.update-progress-track.majority span{background:#52a83c}
+.update-progress-track.indeterminate span{width:30%;animation:ota-progress-sweep 1500ms ease-in-out infinite}
 .update-task-actions{margin-top:12px}
-@media(max-width:640px){.update-options{grid-template-columns:1fr}.update-options .update-beta,.update-options .update-actions{grid-column:1}.software-update-heading{align-items:flex-start}}
+@keyframes ota-rotate{to{transform:rotate(360deg)}}
+@keyframes ota-release-enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ota-progress-sweep{from{transform:translateX(-100%)}to{transform:translateX(335%)}}
+@media(prefers-reduced-motion:reduce){
+  .update-check-spinner svg,.update-release,.update-ready-orbit span,.update-progress-track.indeterminate span{animation:none}
+  .update-progress-track span{transition:none}
+}
+@media(max-width:640px){.software-update-heading{align-items:flex-start}}
 @media(max-width:950px){.route-rows summary{grid-template-columns:13px 83px 30px minmax(0,1fr)}.route-delta{grid-column:3 / -1}}

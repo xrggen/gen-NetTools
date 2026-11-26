@@ -33,6 +33,14 @@ docker compose ps
 curl --fail --show-error https://ota.12306.gd.cn:23887/healthz
 ```
 
+### 新加坡节点复用 ScreenShare GitCode 授权
+
+同节点部署可使用 `gen-nettools-ota-screenshare.service`。它在现有 ScreenShare 网关容器中启动 Release 读取进程，只允许读取 `u010019490/gen-NetTools` 的 Release 和三个 OTA 资产。进程监听 `127.0.0.1:48123`，由 systemd 管理的启动脚本通过进程间凭据访问。GitCode 授权留在网关运行环境中。控制面使用既有运行材料和公开端口。GitHub 私有仓库备用源仍需该仓库的只读授权。
+
+将 `run-screenshare-ota.sh`、`server.mjs`、`screenshare-reader.mjs`、`screenshare-server.mjs` 和 systemd 单元部署到 `/opt/gen-nettools-ota/screenshare-reader-v1`。目录及文件由 root 管理。先运行脚本的 `--preview` 模式，在回环端口 48124 校验签名 Release。预览时维持正式端口的 Host 和 TLS SNI。停止预览后，停止原 Compose 的控制面容器并启用 systemd 单元。回退时先停止并禁用单元，再启动原容器。
+
+上线后用 `systemctl is-enabled gen-nettools-ota-screenshare` 和 `systemctl is-active gen-nettools-ota-screenshare` 核对持久状态。使用现有 TLS 信任和客户端凭据分别检查旧版本和当前版本，并核对下载包 SHA-256。读取进程跟随现有 ScreenShare 网关的可用性，网关重启后 systemd 会重新建立读取通路。
+
 ## 控制面 API
 
 | 请求 | 用途 |
@@ -41,9 +49,15 @@ curl --fail --show-error https://ota.12306.gd.cn:23887/healthz
 | `GET /api/v3/client-update/check` | 查询当前版本可用更新。必传 `version`、`channel=stable\|beta`、`platform=win32` 和 `arch=x64`。Beta 订阅需 `developer_opt_in=1`。具备 GA 晋级能力的客户端传 `ota_policy=ga-promotion-v1`。 |
 | `GET /api/v3/client-update/download/{provider}/release/{tag}/{asset}/{manifestSha256}` | 获取绑定到指定来源、版本、安装包名称及签名清单摘要的下载。Beta 安装包同样需要 `developer_opt_in=1`。 |
 
-检查和下载携带 `Authorization: Bearer <访问凭据>`。用获准客户端通过安全输入方式提供该值。GitCode（`u010019490/gen-NetTools`）作为主源，GitHub（`xrggen/gen-NetTools`）作为备用源。只有 DNS、连接、超时、429 或上游 5xx 等可用性错误触发切换。鉴权、TLS 信任、签名、资产身份和数据错误会拦截更新。下载绑定单一来源与 tag。上游提供受信临时 CDN URL 时返回 302；上游直接返回文件时支持单一 Range，校验所返回的范围和长度。
+检查和下载携带 `Authorization: Bearer <访问凭据>`。Windows 客户端使用部署管理员预配置的授权。GitCode（`u010019490/gen-NetTools`）作为主源，GitHub（`xrggen/gen-NetTools`）作为备用源。只有 DNS、连接、超时、429 或上游 5xx 等可用性错误触发切换。鉴权、TLS 信任、签名、资产身份和数据错误会拦截更新。下载绑定单一来源与 tag。上游提供受信临时 CDN URL 时返回 302；上游直接返回文件时支持单一 Range，校验所返回的范围和长度。
 
 更新可用时返回 `updateAvailable`、`requestedChannel`、`channel`、`provider`、`manifestBase64`、`signature`、`manifestSha256` 和 `downloadPath`，跨通道时另带 `transition`。认证和订阅异常分别为 401/403。固定下载绑定不符为 409。显式最低版本门槛返回 426，并附当前更新查询结果。
+
+## Windows 客户端授权预配置
+
+管理员在提权的受控部署流程中调用已安装的 `app\resources\app\dist\machine-helper.exe ota-provision`。通过标准输入提供现有部署凭据的原始 ASCII 字节（32 至 256 字节，无换行），发送后关闭输入流。退出码 `0` 表示已写入机器范围 DPAPI 加密的注册表值。新的配置在应用下次启动时生效。
+
+应用优先使用管理员预配置的授权。对于既有安装，缺少预配置时沿用历史保存在本机的授权。软件更新页只提供通道设置和检查、下载、安装操作。
 
 ## 发布与签名合同
 
@@ -63,4 +77,4 @@ curl --fail --show-error https://ota.12306.gd.cn:23887/healthz
 2. 接入 Windows 设置页的手动检查、后台检查、订阅开关、受信建链、下载进度和断点续传。
 3. 验收实际更新前后的版本、UAC 提权、失败恢复、保留用户数据、Beta/GA 晋级，以及端点证书轮换流程。
 
-本地自动测试可运行 `node --test ota.test.mjs`。测试使用合成 Release 与临时内存签名。
+本地自动测试可运行 `node --test ota.test.mjs screenshare-reader.test.mjs`。测试使用合成 Release 与临时内存签名。

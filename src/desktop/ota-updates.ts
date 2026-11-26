@@ -9,30 +9,44 @@ type Options = {
   version: string;
   db: DatabaseSync;
   protocol?: OtaProtocol;
-  crypt(operation: 'protect' | 'unprotect', buffer: Buffer): Buffer;
+  readManagedAccess?(): Buffer | undefined;
+  unprotect(buffer: Buffer): Buffer;
   cache(): string;
   install(path: string, release: OtaRelease): Promise<boolean>;
   notify(status: UpdateStatus): void;
 };
 
 const accessPattern = /^[\x21-\x7e]{32,256}$/;
+const unconfiguredMessage = '本机尚未获得在线更新授权。';
 
 export class OtaUpdates {
   private status: UpdateStatus;
   private candidate?: OtaRelease;
   private completeInstaller?: string;
   private task?: AbortController;
+  private readonly protectedAccess?: Buffer;
+  private readonly configurationMessage?: string;
 
   constructor(private readonly options: Options) {
     const { version, protocol } = options;
     const storedChannel = this.preference('ota-channel');
     const channel: UpdateChannel = storedChannel === 'stable' || storedChannel === 'beta' ? storedChannel :
       parseVersion(version)?.beta === undefined ? 'stable' : 'beta';
-    const hasAccess = Boolean(this.preference('ota-access'));
+    let readFailed = false;
+    try {
+      const managed = options.readManagedAccess?.();
+      const legacy = managed ? undefined : this.preference('ota-access');
+      this.protectedAccess = managed ?? (legacy ? Buffer.from(legacy, 'base64') : undefined);
+    } catch {
+      readFailed = true;
+    }
+    const hasAccess = Boolean(this.protectedAccess);
+    this.configurationMessage = !protocol ? '此构建未配置 OTA 信任材料。' :
+      readFailed ? '无法读取本机在线更新授权。请联系部署管理员。' : !hasAccess ? unconfiguredMessage : undefined;
     this.status = {
       version, channel, source: 'online', sources: ['online'], hasAccess,
       state: protocol && hasAccess ? 'idle' : 'configuration-required',
-      ...(!protocol ? { message: '此构建未配置 OTA 信任材料。' } : {}),
+      message: this.configurationMessage,
     };
   }
 
@@ -50,42 +64,30 @@ export class OtaUpdates {
 
   configure(value: UpdateConfiguration) {
     if (this.task) throw new Error('请先暂停下载或等待更新操作完成。');
-    if (!value || value.source !== 'online' || !['stable', 'beta'].includes(value.channel)) throw new Error('更新通道设置无效。');
-    const { access } = value;
-    let protectedAccess: Buffer | undefined;
-    if (access?.mode === 'replace') {
-      if (typeof access.value !== 'string' || !accessPattern.test(access.value)) throw new Error('请填写 32 至 256 位控制面访问凭据。');
-      protectedAccess = this.options.crypt('protect', Buffer.from(access.value));
-    } else if (access !== undefined && access?.mode !== 'clear') throw new Error('控制面访问凭据操作无效。');
-    if (value.channel === this.status.channel && !access) return this.status;
+    if (!value || typeof value !== 'object' || value.source !== 'online' || !['stable', 'beta'].includes(value.channel)) {
+      throw new Error('更新通道设置无效。');
+    }
+    if ('access' in value) throw new Error('在线更新授权由部署方管理。');
+    if (value.channel === this.status.channel) return this.status;
 
-    const db = this.options.db;
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const save = db.prepare('INSERT INTO preferences VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET content=excluded.content');
-      if (protectedAccess) save.run('ota-access', protectedAccess.toString('base64'));
-      if (access?.mode === 'clear') db.prepare('DELETE FROM preferences WHERE name = ?').run('ota-access');
-      save.run('ota-channel', value.channel);
-      db.exec('COMMIT');
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
-    finally { protectedAccess?.fill(0); }
-    const hasAccess = Boolean(this.preference('ota-access'));
+    this.options.db.prepare('INSERT INTO preferences VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET content=excluded.content')
+      .run('ota-channel', value.channel);
     this.candidate = undefined;
     this.completeInstaller = undefined;
-    return this.publish({ channel: value.channel, hasAccess, state: hasAccess && this.options.protocol ? 'idle' : 'configuration-required',
+    const { hasAccess } = this.status;
+    return this.publish({ channel: value.channel, state: hasAccess && this.options.protocol ? 'idle' : 'configuration-required',
       latestVersion: undefined, notes: undefined, mandatory: undefined, downloaded: undefined, size: undefined,
-      message: this.options.protocol ? undefined : '此构建未配置 OTA 信任材料。' });
+      message: this.configurationMessage });
   }
 
   private withAccess() {
     const { protocol } = this.options;
-    const stored = this.preference('ota-access');
     if (!protocol) throw new Error('此构建未配置 OTA 信任材料。');
-    if (!stored) throw new Error('请先在软件更新中保存控制面访问凭据。');
-    const decrypted = this.options.crypt('unprotect', Buffer.from(stored, 'base64'));
+    if (!this.protectedAccess) throw new Error(this.configurationMessage ?? unconfiguredMessage);
+    const decrypted = this.options.unprotect(Buffer.from(this.protectedAccess));
     try {
       const access = decrypted.toString('utf8');
-      if (!accessPattern.test(access)) throw new Error('已保存的控制面访问凭据无效。');
+      if (!accessPattern.test(access)) throw new Error('本机在线更新授权无效。');
       return { protocol, access };
     } finally { decrypted.fill(0); }
   }
@@ -147,7 +149,7 @@ export class OtaUpdates {
     }, 'ready');
   }
 
-  dispose() { this.task?.abort(); }
+  dispose() { this.task?.abort(); this.protectedAccess?.fill(0); }
 
   private async run(patch: Partial<UpdateStatus>, work: (signal: AbortSignal) => Promise<UpdateStatus>, errorState: 'error' | 'ready' = 'error') {
     const controller = new AbortController();

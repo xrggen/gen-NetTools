@@ -45,7 +45,7 @@ export class OtaProtocol {
     const response = await this.request(url, { authorization: `Bearer ${access}` }, signal, this.ca);
     const body = await readMetadata(response);
     const status = response.statusCode;
-    if (status === 401) throw new Error('控制面访问凭据无效。请在软件更新中重新保存。');
+    if (status === 401) throw new Error('本机在线更新授权无效。请联系部署管理员。');
     if (status === 503 && body.code === 'upstream_not_configured') throw new Error('控制面已连接，发布源尚未接入。');
     if (status !== 200 && status !== 426) throw new Error(`控制面无法完成更新检查（HTTP ${status ?? '未知'}）。`);
     if (body.requestedChannel !== channel || typeof body.updateAvailable !== 'boolean') throw new Error('更新通道响应无效。');

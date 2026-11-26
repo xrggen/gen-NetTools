@@ -16,7 +16,10 @@ ShowUninstDetails show
 !include "LogicLib.nsh"
 
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\gen-NetTools"
-VIProductVersion "${VERSION}.0"
+!ifndef VERSION_NUMERIC
+  !define VERSION_NUMERIC "${VERSION}.0"
+!endif
+VIProductVersion "${VERSION_NUMERIC}"
 VIAddVersionKey /LANG=2052 "ProductName" "gen-NetTools"
 VIAddVersionKey /LANG=2052 "FileDescription" "gen-NetTools Windows x64 离线安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${VERSION}"
@@ -30,6 +33,10 @@ Var Existing
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "退出安装并启动程序"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchInstalledApp
+!insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
@@ -76,6 +83,15 @@ Var Existing
   Pop $0
   Pop $1
 !macroend
+
+Function LaunchInstalledApp
+  nsExec::ExecToStack /TIMEOUT=10000 '"$PLUGINSDIR\machine-helper.exe" launch-installed'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONINFORMATION "安装已完成。请从 Windows 开始菜单打开 gen-NetTools。"
+  ${EndIf}
+FunctionEnd
 
 Function .onInit
   ${IfNot} ${RunningX64}

@@ -195,7 +195,14 @@ async function start() {
   const deployment = new Deployment(directory, event => {
     if (window && !window.isDestroyed()) window.webContents.send('deployment-event', event);
   });
-  const updates = new OtaUpdates({ version: app.getVersion(), db, crypt: (operation, input) => dpapi(operation, input, true),
+  const updates = new OtaUpdates({ version: app.getVersion(), db, unprotect: input => dpapi('unprotect', input, true),
+    readManagedAccess: () => {
+      if (!app.isPackaged) return;
+      const result = spawnSync(machineHelper, ['ota-read-managed'], { windowsHide: true, maxBuffer: 8192, timeout: 8000 });
+      if (result.status === 3) return;
+      if (result.status !== 0 || !result.stdout?.length) throw new Error('无法读取本机在线更新授权。');
+      return result.stdout;
+    },
     protocol: NETTOOLS_OTA_CA_PEM && NETTOOLS_OTA_VERIFIER_PEM ? new OtaProtocol(NETTOOLS_OTA_CA_PEM, verifier(NETTOOLS_OTA_VERIFIER_PEM)) : undefined,
     notify: status => { if (window && !window.isDestroyed()) window.webContents.send('update-event', status); },
     cache: () => {

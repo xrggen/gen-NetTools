@@ -43,7 +43,7 @@ export function createTlsOtaServer({ cert, tlsKey, access, minimumClientVersion,
   return server;
 }
 
-function start() {
+export function start({ gitcodeFetch, listenPort = port, listenAddress = '0.0.0.0' } = {}) {
   const minimumClientVersion = process.env.NETTOOLS_OTA_MINIMUM_CLIENT_VERSION || undefined;
   if (minimumClientVersion && !parseVersion(minimumClientVersion)) throw new Error('OTA 最低客户端版本格式无效。');
   const cert = readMaterial('tls/fullchain.pem');
@@ -51,17 +51,20 @@ function start() {
   const publicKey = verifier(readMaterial('publisher/verification.pem'));
   const access = readAccess('client/access.txt', 32);
   const allowBootstrap = process.env.NETTOOLS_OTA_BOOTSTRAP_WITHOUT_UPSTREAM === '1';
-  const gitcodeAccess = readAccess('upstream/gitcode.txt', 1, allowBootstrap);
-  const providers = gitcodeAccess ? {
-    gitcode: createProvider('gitcode', { publicKey, readAccess: gitcodeAccess }),
-    github: createProvider('github', { publicKey, readAccess: readAccess('upstream/github.txt', 1, true) }),
+  const gitcodeAccess = gitcodeFetch ? undefined : readAccess('upstream/gitcode.txt', 1, allowBootstrap);
+  const githubAccess = gitcodeFetch || gitcodeAccess ? readAccess('upstream/github.txt', 1, true) : undefined;
+  const providers = gitcodeFetch || gitcodeAccess ? {
+    gitcode: createProvider('gitcode', { publicKey, readAccess: gitcodeAccess, fetchImpl: gitcodeFetch }),
+    github: githubAccess || !gitcodeFetch
+      ? createProvider('github', { publicKey, readAccess: githubAccess })
+      : createProvider('github', { publicKey, fetchImpl: async () => new Response(null, { status: 503 }) }),
   } : undefined;
   const server = createTlsOtaServer({ cert, tlsKey, access, minimumClientVersion, providers });
   server.on('error', error => {
     process.stderr.write(`OTA 启动或监听失败（${error.code ?? 'listen_failed'}）。\n`);
     process.exitCode = 1;
   });
-  server.listen(port, '0.0.0.0', () => process.stdout.write(`gen-NetTools OTA listening at https://${host}:${port}\n`));
+  server.listen(listenPort, listenAddress, () => process.stdout.write(`gen-NetTools OTA listening on port ${listenPort}\n`));
   for (const signal of ['SIGTERM', 'SIGINT']) {
     process.once(signal, () => {
       server.close();

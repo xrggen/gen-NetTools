@@ -113,19 +113,33 @@ db.exec('CREATE TABLE preferences (name TEXT PRIMARY KEY, content TEXT NOT NULL)
 const states = [];
 let sawInstall = false;
 try {
-  const protocol = new OtaProtocol('pinned test CA', publicKey, async url => url.pathname.endsWith('/check')
-    ? response(200, Buffer.from(JSON.stringify(latest))) : response(200, data));
-  const updates = new OtaUpdates({ version: '0.1.1', db, protocol, cache: () => cache,
-    crypt: (_operation, buffer) => Buffer.from(buffer), notify: status => states.push(status.state),
+  const legacyAccess = 'synthetic-legacy-test-000000000001';
+  let expectedAccess = legacyAccess;
+  const protocol = new OtaProtocol('pinned test CA', publicKey, async (url, headers) => {
+    assert.equal(headers.authorization, `Bearer ${expectedAccess}`);
+    return url.pathname.endsWith('/check') ? response(200, Buffer.from(JSON.stringify(latest))) : response(200, data);
+  });
+  const options = { version: '0.1.1', db, protocol, cache: () => cache,
+    unprotect: buffer => Buffer.from(buffer), notify: status => states.push(status.state),
     install: async (path, release) => {
       assert.equal(path, cached);
       assert.equal(release.manifest.installer.sha256, sha256(await readFile(path)));
       sawInstall = true;
       return false;
     },
-  });
-  assert.equal(updates.getStatus().state, 'configuration-required');
-  const configured = updates.configure({ source: 'online', channel: 'stable', access: { mode: 'replace', value: access } });
+  };
+  assert.equal(new OtaUpdates(options).getStatus().state, 'configuration-required');
+  db.prepare('INSERT INTO preferences VALUES (?, ?)').run('ota-access', Buffer.from(legacyAccess).toString('base64'));
+  const legacy = new OtaUpdates(options);
+  assert.equal((await legacy.check()).state, 'available');
+  legacy.dispose();
+
+  expectedAccess = access;
+  const updates = new OtaUpdates({ ...options, readManagedAccess: () => Buffer.from(access) });
+  assert.throws(() => updates.configure({ source: 'online', channel: 'stable', access: { mode: 'replace', value: access } }), /由部署方管理/);
+  assert.throws(() => updates.configure({ source: 'online', channel: 'stable', access: { mode: 'clear' } }), /由部署方管理/);
+  assert.equal(updates.configure({ source: 'online', channel: 'beta' }).channel, 'beta');
+  const configured = updates.configure({ source: 'online', channel: 'stable' });
   assert.equal(configured.hasAccess, true);
   assert.equal(Object.hasOwn(configured, 'access'), false);
   assert.equal((await updates.check()).state, 'available');

@@ -1,0 +1,2 @@
+ota-backend/*.sh text eol=lf
+ota-backend/*.service text eol=lf

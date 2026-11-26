@@ -3,9 +3,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { ensureNewArtifact } from './stage-windows.mjs';
+import { parseVersion } from '../ota-backend/version.mjs';
 
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
-if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('项目版本格式无效。');
+if (!parseVersion(version)) throw new Error('项目版本格式无效。');
 const mode = process.argv[2];
 if (mode && mode !== '--bootstrap') throw new Error('不支持的部署包模式。');
 const suffix = mode === '--bootstrap' ? '-bootstrap' : '';
@@ -13,6 +14,8 @@ const output = resolve('release', `gen-NetTools-${version}-ota-backend-ubuntu-do
 const files = [
   '.dockerignore', 'Dockerfile', 'compose.yaml', 'README.md', 'manifest.example.json',
   'server.mjs', 'http.mjs', 'health.mjs', 'version.mjs', 'providers.mjs', 'manifest.mjs', 'ota.test.mjs',
+  'screenshare-reader.mjs', 'screenshare-reader.test.mjs', 'screenshare-server.mjs', 'run-screenshare-ota.sh',
+  'gen-nettools-ota-screenshare.service',
 ];
 await ensureNewArtifact(output);
 await ensureNewArtifact(`${output}.sha256`);
